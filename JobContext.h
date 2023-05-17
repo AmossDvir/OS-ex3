@@ -17,6 +17,7 @@
 static std::vector<std::vector<std::pair<K2 *, V2 *>>> sharedDB = {};
 //static std::vector<std::vector<std::pair<K2 *, V2 *>>> sharedDBAfterShuffle = {};
 
+//////
 typedef struct {
     int threadId;
     Barrier *barrier;
