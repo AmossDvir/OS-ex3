@@ -10,56 +10,56 @@
 //#include "MapReduceFramework.h"
 #include "Barrier/Barrier.h"
 #include <atomic>
+#include <semaphore.h>
 #include "MapReduceClient.h"
 
 
-std::vector<std::vector<std::pair<K2 *, V2 *>>> sharedDB;
-std::vector<std::vector<std::pair<K2 *, V2 *>>> sharedDBAfterShuffle;
+static std::vector<std::vector<std::pair<K2 *, V2 *>>> sharedDB = {};
+//static std::vector<std::vector<std::pair<K2 *, V2 *>>> sharedDBAfterShuffle = {};
 
-typedef struct
-{
-    std::atomic<int> *atomic_counter;
+typedef struct {
     int threadId;
     Barrier *barrier;
-    std::vector<std::pair<K2 *, V2 *>> *dbMap;
+//    std::vector<std::pair<K2 *, V2 *>> *dbMap;
+    std::vector<IntermediatePair*> dbMap;
     const MapReduceClient *client;
     const InputVec *inputVec;
+    sem_t sharedDBSemaphore;
 } ThreadContext;
 
-class JobContext
-{
+class JobContext {
 private:
     pthread_t *threads;
 //    JobState state;
-    ThreadContext *contexts;
+
     int threadsNum;
-    std::atomic<int> atomic_counter;
-    std::vector<std::pair<K2*, V2*>> db;
+    std::vector<ThreadContext> contexts={};
+//    std::vector<std::pair<K2 *, V2 *>> db;
+    sem_t sharedDBSemaphore;
 
     void initializeContexts(Barrier &barrier);
 
     void initializeThreads();
 
+    void initializeDB() ;
+
     const MapReduceClient *client;
     const InputVec *inputVec;
 
 public:
-    inline pthread_t getThread(int index)
-    {
+    inline pthread_t getThread(int index) {
         return threads[index];
     }
 
     JobContext(int multiThreadLevel, Barrier &barrier, const MapReduceClient &client, const InputVec &inputVec);
 
-    inline void *getThreadContext(int index)
-    {
+    inline void *getThreadContext(int index) {
         return (void *) &contexts[index];
     }
 
-    inline ThreadContext *getThreadsContexts()
-    {
-        return contexts;
-    }
+//    inline ThreadContext *getThreadsContexts() {
+//        return contexts;
+//    }
 };
 
 

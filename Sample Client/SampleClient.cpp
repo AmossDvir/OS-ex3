@@ -32,7 +32,7 @@ public:
 class CounterClient : public MapReduceClient {
 public:
 	void map(const K1* key, const V1* value, void* context) const {
-		std::array<int, 256> counts;
+		std::array<int, 256> counts{};
 		counts.fill(0);
 		for(const char& c : static_cast<const VString*>(value)->content) {
 			counts[(unsigned char) c]++;

@@ -14,10 +14,9 @@ typedef void *JobHandle;
 
 void emit2(K2 *key, V2 *value, void *context)
 {
-    std::cout << "Key: ";
-    ThreadContext *con = static_cast<ThreadContext *>(context);
-    con->dbMap.push_back(std::make_pair(*key, *value));
-    db.save(con);
+    auto *con = static_cast<ThreadContext *>(context);
+    auto pair = new IntermediatePair(key,value);
+    con->dbMap.push_back(pair);
 }
 
 void emit3(K3 *key, V3 *value, void *context)

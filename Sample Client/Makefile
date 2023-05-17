@@ -9,7 +9,6 @@ INCS=-I.
 CFLAGS = -Wall -std=c++11 -pthread -g $(INCS)
 CXXFLAGS = -Wall -std=c++11 -pthread -g $(INCS)
 LDFLAGS = -L. -lMapReduceFramework
-
 EXE = SampleClient
 TARGETS = $(EXE)
 
