@@ -106,7 +106,7 @@ void *threadEntryPoint (void *arg)
       mutex.unlock ();
     }
   br->barrier ();
-  //
+  ///
 
   //    reduce:
   const IntermediateVec *pairs = &sharedDB.back ();
