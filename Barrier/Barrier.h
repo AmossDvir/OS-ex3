@@ -9,7 +9,7 @@ class Barrier {
 public:
 	Barrier(int numThreads);
 	~Barrier();
-	void barrier(std::vector<IntermediateVec> &originVec , std::vector<IntermediateVec> &returnVec, int tid, std::atomic<int> &processed);
+	void barrier();
 
 private:
 	pthread_mutex_t mutex;

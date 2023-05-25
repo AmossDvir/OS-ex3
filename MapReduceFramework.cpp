@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <atomic>
 #include <mutex>
+#include <unordered_map>
 #include "MapReduceFramework.h"
 
 typedef void *JobHandle;
@@ -18,17 +19,18 @@ typedef struct JobContext;
 typedef struct ThreadContext {
     int threadId;
 
-    IntermediateVec dbMap;
+//    IntermediateVec dbMap;
     JobContext *job;
     const MapReduceClient *client{};
     const InputVec *inputVec{};
+    IntermediateVec threadVector;
     pthread_mutex_t *threadMutex;
 } ThreadContext;
 
 typedef struct JobContext {
-    std::vector<ThreadContext> contexts;
-    std::vector<IntermediateVec> *interVecSorted;
-    std::vector<IntermediateVec> *interVecShuffled;
+    ThreadContext *contexts;
+    std::unordered_map<int, IntermediateVec> *interVecSorted;
+    std::vector<IntermediateVec*> *interVecShuffled;
     OutputVec *outVec;
     pthread_t *threads{};
     int threadsNum{};
@@ -37,63 +39,89 @@ typedef struct JobContext {
     std::atomic<stage_t> stage;
     std::atomic<int> processed;
     std::atomic<unsigned long> total;
-    std::atomic<int> currentIndex;
-    std::atomic<int> pairsCount;
+    std::atomic<int>* currentIndex;
+    std::atomic<int>* pairsCount;
+    Barrier *barrier;
 } JobContext;
 
 
-void handleSort(IntermediateVec &threadVec) {
-    if (!threadVec.empty()) {
-        std::sort(threadVec.begin(), threadVec.end(),
-                  [](const IntermediatePair &pair1, const IntermediatePair &pair2) -> bool {
-                      return *pair1.first < *pair2.first;
-                  }
-        );
+K2* findMax(const std::unordered_map<int, IntermediateVec>* intermediaryVectors) {
+    K2* maxKey = nullptr;
+    for (const auto& vector : *intermediaryVectors) {
+        if (!vector.second.empty()) {
+            K2* key = vector.second.back().first;
+            if (maxKey == nullptr || *maxKey < *key) {
+                maxKey = key;
+            }
+        }
+    }
+    return maxKey;
+}
+
+void handleShuffle(ThreadContext* threadContext) {
+    // Shuffling the Thread zero's vector (only after all threads are sorted):
+    while(!threadContext->job->interVecSorted->empty()){
+        IntermediateVec* tempVec = new IntermediateVec;
+        K2* maxKey = findMax(threadContext->job->interVecSorted);
+        // for i in range todo
+
+        for(auto& pair: *threadContext->job->interVecSorted) {
+            IntermediateVec &vec = pair.second;
+            while (!vec.empty() && (!(*(vec.back().first) < *maxKey) && !(*maxKey < *(vec.back().first)))) {
+                tempVec->push_back(vec.back());
+                vec.pop_back();
+                // TODO: update 64 bit atomic variable - Mutex isn't needed
+            }
+            if (vec.empty()) {
+                threadContext->job->interVecSorted->erase(pair.first);
+                break;
+            }
+        }
+         threadContext->job->interVecShuffled->push_back(tempVec);
+         tempVec = nullptr;
     }
 }
 
 void *threadEntryPoint(void *arg) {
-    auto *threadData = static_cast<std::pair<int, std::vector<ThreadContext>> *>(arg);
-    int tid = threadData->first;
-    IntermediateVec threadVec = IntermediateVec();
-    std::vector<ThreadContext> contexts = threadData->second;
-    ThreadContext threadContext = contexts[tid];
-    auto *br = new Barrier(threadContext.job->threadsNum);
 
-    const MapReduceClient *client = threadContext.client;
-    unsigned long index = 0;
-    while ((index = threadContext.job->currentIndex.fetch_add(1))
-           < (threadContext.inputVec->size())) {
-        // Process element at index
-        std::pair<K1 *, V1 *> inputPair = (*threadContext.inputVec)[index];
-        //map
-        auto *emitData = new std::pair<IntermediateVec* , JobContext*>(&threadVec, threadContext.job);
-        client->map(inputPair.first, inputPair.second, emitData);//?
-        threadContext.job->processed++;
+    ThreadContext *threadContext = (ThreadContext*) arg;
+
+    while (true) // TODO: Change the true value
+    {
+        int index = (*(threadContext->job->currentIndex))++;
+        if (index >= threadContext->inputVec->size())
+        {
+            break;
+        }
+        InputPair inputPair = (*threadContext->inputVec)[index];
+        threadContext->client->map(inputPair.first, inputPair.second, arg);//?
+        // TODO: update atomic variable in charge of state and counter of pairs processed
+        //total - input vec size , does not change in map
+        //atomic counter 64 bit, 2 - state 31 - total - 31 counter
     }
 
-    //sort
-    handleSort(threadVec);
+    // sort
+    std::sort(threadContext->threadVector.begin(), threadContext->threadVector.end(),
+              [](const IntermediatePair &pair1, const IntermediatePair &pair2) -> bool {
+                  return *pair1.first < *pair2.first;});
+    // ADD MUTEX
+    threadContext->job->interVecSorted->insert({threadContext->threadId, threadContext->threadVector});
+    //
+    threadContext->job->barrier->barrier();
 
-    if (!threadVec.empty()) {
-        threadContext.job->interVecSorted->push_back(threadVec);
+    if(threadContext->threadId == 0) {
+        // TODO: update atomic variable 64 bit - todo update total and stage
+        *threadContext->job->currentIndex = 0;
+        handleShuffle(threadContext);
     }
+    threadContext->job->barrier->barrier();
+    //todo update total and stage
 
-
-    pthread_mutex_lock(threadContext.threadMutex);
-    threadContext.job->stage = SHUFFLE_STAGE;
-    threadContext.job->processed = 0.0;
-    threadContext.job->total = threadContext.job->pairsCount;
-    pthread_mutex_unlock(threadContext.threadMutex);
-
-    br->barrier(*threadContext.job->interVecSorted, *threadContext.job->interVecShuffled, tid, threadContext.job->processed);
-
-    pthread_mutex_lock(threadContext.threadMutex);
-    threadContext.job->stage = REDUCE_STAGE;
-    threadContext.job->processed = 0.0;
-    threadContext.job->total = threadContext.job->pairsCount;
-    pthread_mutex_unlock(threadContext.threadMutex);
-
+//    pthread_mutex_lock(threadContext.threadMutex);
+//    threadContext.job->stage = REDUCE_STAGE;
+//    threadContext.job->processed = 0.0;
+//    threadContext.job->total = threadContext.job->pairsCount;
+//    pthread_mutex_unlock(threadContext.threadMutex);
 
     //
     //    reduce:
@@ -110,23 +138,24 @@ initializeContexts(JobContext *job, const MapReduceClient &client, const InputVe
     for (int i = 0; i < threadsNum; i++) {
         ThreadContext thrCon;
         thrCon.threadId = i;
-        thrCon.dbMap = IntermediateVec();
+//        thrCon.dbMap = IntermediateVec();
         thrCon.client = &client;
         thrCon.inputVec = &inputVec;
         thrCon.threadMutex = mutex;
         thrCon.job = job;
+        thrCon.threadVector=IntermediateVec ();
         job->contexts[i] = thrCon;
     }
 }
 
 void
-initializeThreads(pthread_t *threads, int threadsNum, std::vector<ThreadContext> &contexts) {
+initializeThreads(JobContext* job) {
     // create "multiThreadLevel threads:
     int res = 0;
 
-    for (int i = 0; i < threadsNum; i++) {
-        auto *threadData = new std::pair<int, std::vector<ThreadContext> >(i, contexts);
-        res = pthread_create(&threads[i], nullptr, threadEntryPoint, threadData);
+    for (int i = 0; i < job->threadsNum; i++) {
+        job->contexts[i].threadId = i;
+        res = pthread_create(&job->threads[i], nullptr, threadEntryPoint, &job->contexts[i]);
         if (res < 0) {
             std::cerr << "system error: pthread_create returned <0 result"
                       << std::endl;
@@ -135,11 +164,10 @@ initializeThreads(pthread_t *threads, int threadsNum, std::vector<ThreadContext>
 }
 
 void emit2(K2 *key, V2 *value, void *context) {
-
-    auto *threadVec = static_cast<std::pair<IntermediateVec*, JobContext*> *>(context)->first;
-    auto *job = static_cast<std::pair<IntermediateVec*, JobContext*> *>(context)->second;
-    job->pairsCount++;
-    threadVec->emplace_back(key, value);
+    ThreadContext *threadContext = (ThreadContext*) context;
+    auto &threadVec = threadContext->threadVector;
+    threadContext->job->pairsCount++;
+    threadVec.emplace_back(key, value);
 }
 
 void emit3(K3 *key, V3 *value, void *context) {//todo: lock mutex
@@ -163,23 +191,25 @@ startMapReduceJob(const MapReduceClient &client, const InputVec &inputVec, Outpu
     job->stage = UNDEFINED_STAGE;
     job->processed = 0;
     job->total = inputVec.size();
-    job->currentIndex = 0;
-    job->pairsCount = 0;
-    job->interVecSorted = new std::vector<IntermediateVec>();
-    job->interVecShuffled = new std::vector<IntermediateVec>();
+    job->currentIndex = new std::atomic<int>(0);
+    job->pairsCount = new std::atomic<int>(0);
+    job->interVecSorted = new std::unordered_map<int,IntermediateVec>();
+    job->interVecShuffled = new std::vector<IntermediateVec*>();
     job->outVec = new OutputVec();
     pthread_mutex_init(job->mutex, nullptr);//todo check if okay
     pthread_mutex_init(job->outputMutex, nullptr);//todo check if okay
+    job->barrier = new Barrier(multiThreadLevel);
 
-    job->contexts = std::vector<ThreadContext>(multiThreadLevel);
+
+    job->contexts = new ThreadContext[multiThreadLevel];
     job->threads = new pthread_t[multiThreadLevel];
     job->threadsNum = multiThreadLevel;
     initializeContexts(job, client, inputVec, multiThreadLevel, job->mutex);
     job->stage = MAP_STAGE;
-    initializeThreads(job->threads, multiThreadLevel, job->contexts);
+    initializeThreads(job);
 
     // return jobHandle
-    return (static_cast<JobHandle>(job));
+    return job;
 }
 
 void waitForJob(JobHandle job) {
@@ -201,5 +231,5 @@ void getJobState(JobHandle job, JobState *state) {
 }
 
 void closeJobHandle(JobHandle job) {
-//   todo: wait for all threads and delete all allocated elements
+    waitForJob(job);
 }
