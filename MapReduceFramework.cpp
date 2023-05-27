@@ -77,10 +77,10 @@ struct JobContext;
 
 struct ThreadContext
 {
-    int threadId;
-    JobContext *job;
-    const MapReduceClient *client;
-    const InputVec *inputVec;
+    int threadId{};
+    JobContext *job{};
+    const MapReduceClient *client{};
+    const InputVec *inputVec{};
     IntermediateVec threadVector;
 };
 
@@ -88,7 +88,8 @@ struct JobContext
 {
     ThreadContext *contexts;
     std::unordered_map<int, IntermediateVec> *interVecSorted;
-    std::vector<IntermediateVec *> *interVecShuffled;
+//    std::vector<IntermediateVec *> *interVecShuffled;
+    std::vector<IntermediateVec > *interVecShuffled;
     OutputVec *outVec;
     pthread_t *threads;
     int threadsNum;
@@ -195,9 +196,6 @@ void handleMap(ThreadContext *threadContext)
         InputPair inputPair = (*threadContext->inputVec)[index];
         threadContext->job->processed->fetch_add(1);
         threadContext->client->map(inputPair.first, inputPair.second, threadContext);//?
-        // TODO: update atomic variable in charge of state and counter of pairs processed
-        //total - input vec size , does not change in map
-        //atomic counter 64 bit, 2 - state 31 - total - 31 counter
     }
 }
 
@@ -220,16 +218,16 @@ void handleShuffle(JobContext &job)
     // Shuffling the Thread zero's vector (only after all threads are sorted):
     while (!job.interVecSorted->empty())
     {
-        auto *tempVec = new IntermediateVec;
+        auto tempVec = IntermediateVec();
         K2 *maxKey = findMax(job.interVecSorted);
-        // for i in range todo
+
 
         for (auto &pair: *job.interVecSorted)
         {
             IntermediateVec &vec = pair.second;
             while (!vec.empty() && (!(*(vec.back().first) < *maxKey) && !(*maxKey < *(vec.back().first))))
             {
-                tempVec->push_back(vec.back());
+                tempVec.push_back(vec.back());
                 vec.pop_back();
                 job.processed->fetch_add(1);
             }
@@ -240,14 +238,28 @@ void handleShuffle(JobContext &job)
             }
         }
         job.interVecShuffled->push_back(tempVec);
-        delete tempVec;
     }
 }
 
 
-void handleReduce(JobContext &job)
+void handleReduce(ThreadContext *threadContext)
 {
 
+  unsigned long index = 0;
+  while ((index = threadContext->job->reduceIndex->fetch_add(1)) <
+  threadContext->job->interVecShuffled->size())
+    {
+      const IntermediateVec *vecToReduce=
+          &(*threadContext->job->interVecShuffled)[index];
+      threadContext->client->reduce(vecToReduce,threadContext);
+      threadContext->job->interVecShuffled->erase(threadContext->job->interVecShuffled->begin() + int(index));
+
+      //todo update counter
+
+//      // TODO: update atomic variable in charge of state and counter of pairs processed
+//      //total - input vec size , does not change in map
+//      //atomic counter 64 bit, 2 - state 31 - total - 31 counter
+    }
 }
 
 void *threadMainFlow(void *arg)
@@ -276,11 +288,7 @@ void *threadMainFlow(void *arg)
     threadContext->job->barrier->barrier();
 
     //    reduce:
-    handleReduce(*threadContext->job);
-
-    //    const IntermediateVec *pairs = &sharedDB.back();
-    //    sharedDB.pop_back();
-    //    client->reduce(pairs, arg);
+    handleReduce(threadContext);
     return nullptr;
 }
 
@@ -320,9 +328,11 @@ void initializeJobContext(JobContext *job, const InputVec &inputVec, int multiTh
     job->processed = new std::atomic<int>(0);
     job->total = new std::atomic<unsigned long>(inputVec.size());
     job->mapIndex = new std::atomic<int>(0);
+    job->reduceIndex = new std::atomic<int>(0);
     job->pairsCount = new std::atomic<int>(0);
     job->interVecSorted = new std::unordered_map<int, IntermediateVec>();
-    job->interVecShuffled = new std::vector<IntermediateVec *>();
+//    job->interVecShuffled = new std::vector<IntermediateVec *>();
+    job->interVecShuffled = new std::vector<IntermediateVec >();
     job->jobAlreadyWaiting = new std::atomic<bool>(false);
     job->outVec = new OutputVec();
     pthread_mutex_init(job->stateMutex, nullptr);
@@ -343,13 +353,11 @@ void emit2(K2 *key, V2 *value, void *context)
 }
 
 void emit3(K3 *key, V3 *value, void *context)
-{//todo: lock mutex
-    auto *job = static_cast<JobContext *>(context);
-    pthread_mutex_lock(job->outputMutex);
-    job->outVec->emplace_back(key, value);
-    //    auto pair = new OutputPair(key, value);
-    pthread_mutex_unlock(job->outputMutex);
-    //    sharedDBOutput.push_back(*pair);
+{
+    auto *threadContext = (ThreadContext *) context;
+    pthread_mutex_lock(threadContext->job->outputMutex);
+    threadContext->job->outVec->emplace_back(key, value);
+    pthread_mutex_unlock(threadContext->job->outputMutex);
 }
 
 JobHandle
