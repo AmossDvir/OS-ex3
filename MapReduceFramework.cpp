@@ -88,12 +88,13 @@ struct JobContext
 {
     ThreadContext *contexts;
     std::unordered_map<int, IntermediateVec> *interVecSorted;
-//    std::vector<IntermediateVec *> *interVecShuffled;
-    std::vector<IntermediateVec > *interVecShuffled;
+    //    std::vector<IntermediateVec *> *interVecShuffled;
+    std::vector<IntermediateVec> *interVecShuffled;
     OutputVec *outVec;
     pthread_t *threads;
     int threadsNum;
     pthread_mutex_t *stateMutex;
+    pthread_mutex_t *reduceMutex;
     pthread_mutex_t *outputMutex;
     pthread_mutex_t *jobWaitMutex;
     std::atomic<stage_t> *stage;
@@ -113,6 +114,7 @@ struct JobContext
         delete outVec;
         delete[] threads;
         delete stateMutex;
+        delete reduceMutex;
         delete outputMutex;
         delete jobWaitMutex;
         delete stage;
@@ -135,6 +137,7 @@ struct JobContext
         outVec = nullptr;
         threads = nullptr;
         stateMutex = nullptr;
+        reduceMutex = nullptr;
         outputMutex = nullptr;
         jobWaitMutex = nullptr;
         stage = nullptr;
@@ -204,9 +207,9 @@ void freeMemory()
 
 }
 
-void handleSort(ThreadContext &threadContext)
+void handleSort(ThreadContext *threadContext)
 {
-    std::sort(threadContext.threadVector.begin(), threadContext.threadVector.end(),
+    std::sort(threadContext->threadVector.begin(), threadContext->threadVector.end(),
               [](const IntermediatePair &pair1, const IntermediatePair &pair2) -> bool
               {
                   return *pair1.first < *pair2.first;
@@ -245,20 +248,16 @@ void handleShuffle(JobContext &job)
 void handleReduce(ThreadContext *threadContext)
 {
 
-  unsigned long index = 0;
-  while ((index = threadContext->job->reduceIndex->fetch_add(1)) <
-  threadContext->job->interVecShuffled->size())
+    unsigned long index = 0;
+
+    while ((index = threadContext->job->reduceIndex->fetch_add(1)) < *threadContext->job->total)
     {
-      const IntermediateVec *vecToReduce=
-          &(*threadContext->job->interVecShuffled)[index];
-      threadContext->client->reduce(vecToReduce,threadContext);
-      threadContext->job->interVecShuffled->erase(threadContext->job->interVecShuffled->begin() + int(index));
-
-      //todo update counter
-
-//      // TODO: update atomic variable in charge of state and counter of pairs processed
-//      //total - input vec size , does not change in map
-//      //atomic counter 64 bit, 2 - state 31 - total - 31 counter
+        pthread_mutex_lock(threadContext->job->reduceMutex);
+        const IntermediateVec *vecToReduce = &(*threadContext->job->interVecShuffled)[index];
+        threadContext->client->reduce(vecToReduce, threadContext);
+        threadContext->job->processed->fetch_add(1);
+//        threadContext->job->interVecShuffled->erase(threadContext->job->interVecShuffled->begin() + int(index));
+        pthread_mutex_unlock(threadContext->job->reduceMutex);
     }
 }
 
@@ -270,7 +269,7 @@ void *threadMainFlow(void *arg)
     handleMap(threadContext);
 
     // sort:
-    handleSort(*threadContext);
+    handleSort(threadContext);
 
     // ADD MUTEX
 
@@ -281,9 +280,9 @@ void *threadMainFlow(void *arg)
     threadContext->job->barrier->barrier();
     if (threadContext->threadId == 0)
     {
-        resetState(*(threadContext->job), SHUFFLE_STAGE, (unsigned long) threadContext->job->pairsCount);
+        resetState(*(threadContext->job), SHUFFLE_STAGE, (unsigned long) *threadContext->job->pairsCount);
         handleShuffle(*threadContext->job);
-        resetState(*(threadContext->job), REDUCE_STAGE, (unsigned long) threadContext->job->pairsCount);
+        resetState(*(threadContext->job), REDUCE_STAGE, (unsigned long) *threadContext->job->pairsCount);
     }
     threadContext->job->barrier->barrier();
 
@@ -322,6 +321,7 @@ initializeThreads(JobContext *job)
 void initializeJobContext(JobContext *job, const InputVec &inputVec, int multiThreadLevel)
 {
     job->stateMutex = new pthread_mutex_t();
+    job->reduceMutex = new pthread_mutex_t();
     job->outputMutex = new pthread_mutex_t();
     job->jobWaitMutex = new pthread_mutex_t();
     job->stage = new std::atomic<stage_t>(UNDEFINED_STAGE);
@@ -331,11 +331,11 @@ void initializeJobContext(JobContext *job, const InputVec &inputVec, int multiTh
     job->reduceIndex = new std::atomic<int>(0);
     job->pairsCount = new std::atomic<int>(0);
     job->interVecSorted = new std::unordered_map<int, IntermediateVec>();
-//    job->interVecShuffled = new std::vector<IntermediateVec *>();
-    job->interVecShuffled = new std::vector<IntermediateVec >();
+    job->interVecShuffled = new std::vector<IntermediateVec>();
     job->jobAlreadyWaiting = new std::atomic<bool>(false);
     job->outVec = new OutputVec();
     pthread_mutex_init(job->stateMutex, nullptr);
+    pthread_mutex_init(job->reduceMutex, nullptr);
     pthread_mutex_init(job->outputMutex, nullptr);
     pthread_mutex_init(job->jobWaitMutex, nullptr);
     job->barrier = new Barrier(multiThreadLevel);
@@ -403,7 +403,8 @@ void waitForJob(JobHandle job)
 void getJobState(JobHandle job, JobState *state)
 {
     auto *jobCon = static_cast<JobContext *> (job);
-    state->percentage = (*jobCon->processed / *jobCon->total) * 100;
+
+    state->percentage = ((static_cast<double>(*jobCon->processed) / *jobCon->total) * 100);
     state->stage = *jobCon->stage;
 }
 

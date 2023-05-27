@@ -25,38 +25,6 @@ Barrier::~Barrier()
 	}
 }
 
-
-//K2* findMax(const std::vector<std::vector<std::pair<K2*, V2*>>>& intermediaryVectors) {
-//    K2* maxKey = nullptr;
-//    for (const auto& vector : intermediaryVectors) {
-//        if (!vector.empty()) {
-//            K2* key = vector.back().first;
-//            if (maxKey == nullptr || *maxKey< *key) {
-//                maxKey = key;
-//            }
-//        }
-//    }
-//    return maxKey;
-//}
-
-
-//void handleShuffle(std::vector<IntermediateVec> &originVec , std::vector<IntermediateVec> &returnVec,  std::atomic<int> &processed) {
-//    // Shuffling the Thread zero's vector (only after all threads are sorted):
-//    while(!originVec.empty()){
-//        IntermediateVec tempVec;
-//        K2* maxKey = findMax(originVec);
-//        for(auto& vec:originVec){
-//            while(!vec.empty()&&!(*(vec.back().first)<*maxKey)&&(*maxKey<*(vec.back().first))){
-//                tempVec.push_back(vec.back());
-//                vec.pop_back();
-//                processed++;
-//            }
-//        }
-//        returnVec.push_back(tempVec);
-//    }
-//}
-
-
 void Barrier::barrier()
 {
 	if (pthread_mutex_lock(&mutex) != 0){
