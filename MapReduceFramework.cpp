@@ -128,7 +128,7 @@ struct JobContext {
     {
       delete interVecSorted;
       delete interVecShuffled;
-      delete outVec;
+//      delete outVec;
       delete[] threads;
 
 //        Mutex deletion:
@@ -154,7 +154,7 @@ struct JobContext {
       contexts = nullptr;
       interVecSorted = nullptr;
       interVecShuffled = nullptr;
-      outVec = nullptr;
+//      outVec = nullptr;
       threads = nullptr;
       stateMutex = nullptr;
       sortMutex = nullptr;
@@ -374,7 +374,8 @@ initializeThreads (JobContext *job)
 }
 
 void
-initializeJobContext (JobContext *job, const InputVec &inputVec, int multiThreadLevel)
+initializeJobContext (JobContext *job, const InputVec &inputVec, int
+multiThreadLevel,OutputVec& outputVec)
 {
   job->stateMutex = new pthread_mutex_t ();
   job->sortMutex = new pthread_mutex_t ();
@@ -390,7 +391,8 @@ initializeJobContext (JobContext *job, const InputVec &inputVec, int multiThread
   job->interVecSorted = new std::vector<IntermediateVec> ();
   job->interVecShuffled = new std::vector<IntermediateVec> ();
   job->jobAlreadyWaiting = new std::atomic<bool> (false);
-  job->outVec = new OutputVec ();
+  job->outVec = &outputVec;//todo i change here instead of creating a new
+  // one
   pthread_mutex_init (job->stateMutex, nullptr);
   pthread_mutex_init (job->sortMutex, nullptr);
   pthread_mutex_init (job->outputMutex, nullptr);
@@ -424,7 +426,7 @@ startMapReduceJob (const MapReduceClient &client, const InputVec &inputVec, Outp
 {
   // initializing the JobContext:
   auto *job = new JobContext ();
-  initializeJobContext (job, inputVec, multiThreadLevel);
+  initializeJobContext (job, inputVec, multiThreadLevel,outputVec);
   initializeThreadsContexts (job, client, inputVec, multiThreadLevel);
   *job->stage = MAP_STAGE;
   initializeThreads (job);
