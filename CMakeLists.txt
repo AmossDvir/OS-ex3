@@ -1,4 +1,4 @@
-# Project configuration
+## Project configuration
 cmake_minimum_required(VERSION 3.16.3)
 project(ex3 VERSION 1.0 LANGUAGES C CXX)
 
@@ -24,7 +24,7 @@ target_link_libraries(MapReduceFramework PUBLIC Threads::Threads)
 
 # Add tests
 add_subdirectory(mattanTests)
-#
+
 #cmake_minimum_required(VERSION 3.16.3)
 #project(ex3)
 #

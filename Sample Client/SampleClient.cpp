@@ -79,9 +79,9 @@ int main(int argc, char** argv)
 	inputVec.push_back({nullptr, &s3});
 	JobState state;
     JobState last_state={UNDEFINED_STAGE,0};
-	JobHandle job = startMapReduceJob(client, inputVec, outputVec, 10000);
+	JobHandle job = startMapReduceJob(client, inputVec, outputVec, 4);
 	getJobState(job, &state);
-
+    OutputVec vec=outputVec;
 	while (state.stage != REDUCE_STAGE || state.percentage != 100.0)
 	{
         if (last_state.stage != state.stage || last_state.percentage != state.percentage){

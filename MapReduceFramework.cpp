@@ -1,6 +1,3 @@
-//
-// Created by amossdvir on 5/9/23.
-//
 #include "iostream"
 #include <pthread.h>
 #include <algorithm>
@@ -12,7 +9,7 @@
 typedef void *JobHandle;
 
 #define SUCCESS 0
-#define ERROR 0
+#define ERROR 1
 
 // The Barrier class, creates a barrier in code so all threads must arrive to this point and continue together
 class Barrier {
@@ -103,7 +100,6 @@ bool keysComp (const K2* &key1, const K2* &key2)
 
 struct JobContext {
     ThreadContext *contexts;
-//    std::unordered_map<int, IntermediateVec> *interVecSorted;
     std::vector<IntermediateVec> *interVecSorted;
     std::vector<IntermediateVec> *interVecShuffled;
     OutputVec *outVec;
@@ -112,7 +108,6 @@ struct JobContext {
     pthread_mutex_t *stateMutex;
     pthread_mutex_t *sortMutex;
     pthread_mutex_t *outputMutex;
-    pthread_mutex_t *jobWaitMutex;
     std::atomic<stage_t> *stage;
     std::atomic<int> *processed;
     std::atomic<unsigned long> *total;
@@ -120,7 +115,6 @@ struct JobContext {
     std::atomic<int> *reduceIndex;
     std::atomic<int> *pairsCount;
     std::atomic<bool> *jobAlreadyWaiting;
-//    std::set<K2 *, decltype (keysComp)> *keysSet;//todo add to destructor
     Barrier *barrier;
 
     //  Destructor:
@@ -128,14 +122,10 @@ struct JobContext {
     {
       delete interVecSorted;
       delete interVecShuffled;
-//      delete outVec;
       delete[] threads;
 
-//        Mutex deletion:
-      validate (pthread_mutex_destroy (stateMutex), "stateMutex destruction failed");
-      validate (pthread_mutex_destroy (sortMutex), "sortMutex destruction failed");
-      validate (pthread_mutex_destroy (outputMutex), "outputMutex destruction failed");
-      validate (pthread_mutex_destroy (jobWaitMutex), "jobWaitMutex destruction failed");
+
+
 
       delete stage;
       delete processed;
@@ -151,15 +141,19 @@ struct JobContext {
         }
       delete[] contexts;
       delete barrier;
+      //        Mutex deletion:
+      validate (pthread_mutex_destroy (stateMutex), "stateMutex destruction failed");
+      validate (pthread_mutex_destroy (sortMutex), "sortMutex destruction failed");
+      validate (pthread_mutex_destroy (outputMutex), "outputMutex destruction failed");
+//      validate (pthread_mutex_destroy (jobWaitMutex), "jobWaitMutex
+//      destruction failed");//todo check  if neede in wait for job
       contexts = nullptr;
       interVecSorted = nullptr;
       interVecShuffled = nullptr;
-//      outVec = nullptr;
       threads = nullptr;
       stateMutex = nullptr;
       sortMutex = nullptr;
       outputMutex = nullptr;
-      jobWaitMutex = nullptr;
       stage = nullptr;
       processed = nullptr;
       total = nullptr;
@@ -240,10 +234,6 @@ void handleShuffle (JobContext &job)
   // Shuffling the Thread zero's vector (only after all threads are sorted):
   int sortedVecSize = (int) job.interVecSorted->size ();
   int counter = 0;
-//  int keysNumber = job.keysSet->size();
-//
-
-  //loop
   while(counter<sortedVecSize)
     {
       K2 *maxKey = findMax (job.interVecSorted);
@@ -253,7 +243,6 @@ void handleShuffle (JobContext &job)
           IntermediateVec &vec = (*job.interVecSorted)[i];
           if (vec.empty ())
             {
-              //
               continue;
             }
           while (!vec.empty () && (!(*(vec.back ().first) < *maxKey)
@@ -273,43 +262,15 @@ void handleShuffle (JobContext &job)
           job.interVecShuffled->push_back (tempVec);
         }
     }
-//    }
-
-//    while (!job.interVecSorted->empty()) {
-//        auto tempVec = IntermediateVec();
-//        K2 *maxKey = findMax(job.interVecSorted);
-
-//        for (auto &pair: *job.interVecSorted) {
-//            IntermediateVec &vec = pair.second;
-//            while (!vec.empty() && (!(*(vec.back().first) < *maxKey) && !(*maxKey < *(vec.back().first)))) {
-//                tempVec.push_back(vec.back());
-//                vec.pop_back();
-//                job.processed->fetch_add(1);
-//            }
-//            if (vec.empty()) {
-//                job.interVecSorted->erase(pair.first);//problem when erasing
-//                // last letter
-////                break;
-//            }
-//        }
-//        if(!tempVec.empty()){
-//          job.interVecShuffled->push_back(tempVec);
-//        }
-
 }
 
 void handleReduce (ThreadContext *threadContext)
 {
 
   unsigned long index = 0;
-//    while ((index = threadContext->job->reduceIndex->fetch_add(1)) < *threadContext->job->total)//todo check this condition
-  int size = threadContext->job->interVecShuffled->size ();
   while ((index = threadContext->job->reduceIndex->fetch_add (1))
          < threadContext->job->interVecShuffled->size ())
     {
-//        if(threadContext->job->interVecShuffled[index].size() <= 0){
-//            continue;
-//        }
       pthread_mutex_lock (threadContext->job->stateMutex);
       const IntermediateVec *vecToReduce = &(*threadContext->job->interVecShuffled)[index];
       int addToProcessed = vecToReduce->size ();
@@ -375,13 +336,13 @@ initializeThreads (JobContext *job)
 
 void
 initializeJobContext (JobContext *job, const InputVec &inputVec, int
-multiThreadLevel,OutputVec& outputVec)
+multiThreadLevel,OutputVec &outputVec)
 {
   job->stateMutex = new pthread_mutex_t ();
   job->sortMutex = new pthread_mutex_t ();
 
   job->outputMutex = new pthread_mutex_t ();
-  job->jobWaitMutex = new pthread_mutex_t ();
+//  job->jobWaitMutex = new pthread_mutex_t ();
   job->stage = new std::atomic<stage_t> (UNDEFINED_STAGE);
   job->processed = new std::atomic<int> (0);
   job->total = new std::atomic<unsigned long> (inputVec.size ());
@@ -396,11 +357,12 @@ multiThreadLevel,OutputVec& outputVec)
   pthread_mutex_init (job->stateMutex, nullptr);
   pthread_mutex_init (job->sortMutex, nullptr);
   pthread_mutex_init (job->outputMutex, nullptr);
-  pthread_mutex_init (job->jobWaitMutex, nullptr);
+//  pthread_mutex_init (job->jobWaitMutex, nullptr);
   job->barrier = new Barrier (multiThreadLevel);
   job->contexts = new ThreadContext[multiThreadLevel];
   job->threads = new pthread_t[multiThreadLevel];
   job->threadsNum = multiThreadLevel;
+
 //  job->keysSet = new std::set<K2 *, decltype (keysComp )>();
 }
 
@@ -410,7 +372,6 @@ void emit2 (K2 *key, V2 *value, void *context)
   auto &threadVec = threadContext->threadVector;
   threadContext->job->pairsCount->fetch_add (1);
   threadVec.emplace_back (key, value);
-//  threadContext->job->keysSet->insert (key);
 }
 
 void emit3 (K3 *key, V3 *value, void *context)
@@ -436,7 +397,7 @@ startMapReduceJob (const MapReduceClient &client, const InputVec &inputVec, Outp
 void waitForJob (JobHandle job)
 {
   auto *jobContext = static_cast<JobContext *>(job);
-  pthread_mutex_lock (jobContext->jobWaitMutex);
+//  pthread_mutex_lock (jobContext->jobWaitMutex);
 
   // Check if already called -> if so return immediately
   if (*jobContext->jobAlreadyWaiting)
@@ -444,7 +405,7 @@ void waitForJob (JobHandle job)
       return;
     }
   *jobContext->jobAlreadyWaiting = true;
-  pthread_mutex_unlock (jobContext->jobWaitMutex);
+//  pthread_mutex_unlock (jobContext->jobWaitMutex);
 
   for (int i = 0; i < jobContext->threadsNum; ++i)
     {
@@ -454,10 +415,10 @@ void waitForJob (JobHandle job)
 
 void getJobState (JobHandle job, JobState *state)
 {
-  auto *jobCon = static_cast<JobContext *> (job);
+  auto *jobCon = (JobContext *) (job);
   pthread_mutex_lock (jobCon->stateMutex);
   state->percentage = (
-      (static_cast<double>(*jobCon->processed) / *jobCon->total) * 100);
+      ((float)(*jobCon->processed) / *jobCon->total) * 100);
   state->stage = *jobCon->stage;
   pthread_mutex_unlock (jobCon->stateMutex);
 }
