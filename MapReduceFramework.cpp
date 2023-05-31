@@ -108,7 +108,7 @@ K2 *findMax (const std::vector<IntermediateVec> *intermediaryVectors)
 void updateStage(JobContext *job, stage_t currentStage,unsigned  long total){
 
     int64_t currentStage64=((int64_t)currentStage)<<62;
-    int64_t total64=((int64_t )total)<<31;
+    int64_t total64=((int64_t )total)<<31;//todo
     int64_t temp=currentStage64+total64;
     *job->atomic_stage=temp;
 }
@@ -152,30 +152,37 @@ void handleSort (ThreadContext *threadContext)
     }
 }
 
-void handleShuffle (JobContext &job) {
+void handleShuffle (JobContext &job)
+{
     // Shuffling the Thread zero's vector (only after all threads are sorted):
-    int sortedVecSize = (int) job.interVecSorted->size();
+    int sortedVecSize = (int) job.interVecSorted->size ();
     int counter = 0;
-    while (counter < sortedVecSize) {
-        K2 *maxKey = findMax(job.interVecSorted);
-        auto tempVec = IntermediateVec();
-        for (int i = 0; i < sortedVecSize; i++) {
+    while (counter < sortedVecSize)
+    {
+        K2 *maxKey = findMax (job.interVecSorted);
+        auto tempVec = IntermediateVec ();
+        for (int i = 0; i < sortedVecSize; i++)
+        {
             IntermediateVec &vec = (*job.interVecSorted)[i];
-            if (vec.empty()) {
+            if (vec.empty ())
+            {
                 continue;
             }
-            while (!vec.empty() && (!(*(vec.back().first) < *maxKey)
-                                    && !(*maxKey < *(vec.back().first)))) {
-                tempVec.push_back(vec.back());
-                vec.pop_back();
-                *job.atomic_stage += 1;
-                if (vec.empty()) {
-                    counter++;
-                }
+            while (!vec.empty () && (!(*(vec.back ().first) < *maxKey)
+                                     && !(*maxKey < *(vec.back ().first))))
+            {
+                tempVec.push_back (vec.back ());
+                vec.pop_back ();
+                *job.atomic_stage+=1;
             }
-            if (!tempVec.empty()) {
-                job.interVecShuffled->push_back(tempVec);
+            if (vec.empty ())
+            {
+                counter++;
             }
+        }
+        if (!tempVec.empty ())
+        {
+            job.interVecShuffled->push_back (tempVec);
         }
     }
 }
@@ -189,8 +196,7 @@ void handleReduce (ThreadContext *threadContext)
     {
         pthread_mutex_lock (threadContext->job->stateMutex);
         const IntermediateVec *vecToReduce = &(*threadContext->job->interVecShuffled)[index];
-        int addToProcessed = vecToReduce->size ();
-
+        int addToProcessed = (int)vecToReduce->size ();
         threadContext->client->reduce (vecToReduce, threadContext);
         *threadContext->job->atomic_stage+=addToProcessed;
         pthread_mutex_unlock (threadContext->job->stateMutex);
@@ -252,15 +258,13 @@ initializeThreads (JobContext *job,unsigned long inputVecSize)
 }
 
 void
-initializeJobContext (JobContext *job, const InputVec &inputVec, int
+initializeJobContext (JobContext *job, int
 multiThreadLevel, OutputVec &outputVec)
 {
     job->stateMutex = new pthread_mutex_t ();
     job->sortMutex = new pthread_mutex_t ();
     job->outputMutex = new pthread_mutex_t ();
     job->waitMutex = new pthread_mutex_t ();
-    job->processed = new std::atomic<int> (0);
-    job->total = new std::atomic<unsigned long> (inputVec.size ());
     job->mapIndex = new std::atomic<int> (0);
     job->reduceIndex = new std::atomic<int> (0);
     job->pairsCount = new std::atomic<int> (0);
@@ -300,7 +304,7 @@ startMapReduceJob (const MapReduceClient &client, const InputVec &inputVec, Outp
 {
     // initializing the JobContext:
     auto *job = new JobContext ();
-    initializeJobContext (job, inputVec, multiThreadLevel, outputVec);
+    initializeJobContext (job, multiThreadLevel, outputVec);
     initializeThreadsContexts (job, client, inputVec, multiThreadLevel);
     auto inputVecSize=(unsigned long )inputVec.size();
     initializeThreads (job,inputVecSize);
