@@ -1,4 +1,4 @@
-# Project configuration
+## Project configuration
 #cmake_minimum_required(VERSION 3.22)
 #project(ex3 VERSION 1.0 LANGUAGES C CXX)
 #
@@ -36,9 +36,9 @@ include_directories(.)
 
 add_executable(ex3
         MapReduceClient.h
-#        "Sample Client/SampleClient.cpp"
+        "Sample Client/SampleClient.cpp"
         MapReduceFramework.cpp
         MapReduceFramework.h
         Barrier.cpp
         Barrier.h
-        "moodleTests/test4.cpp")
+        )

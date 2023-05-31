@@ -4,10 +4,12 @@
 #include <atomic>
 #include <set>
 #include "MapReduceFramework.h"
+#include "Barrier.h"
 
 typedef void *JobHandle;
 struct JobContext;
-
+#define SUCCESS 0
+#define ERROR 1
 struct ThreadContext {
     int threadId{};
     JobContext *job{};

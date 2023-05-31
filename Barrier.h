@@ -4,8 +4,7 @@
 #include "MapReduceClient.h"
 #include <atomic>
 // a multiple use barrier
-#define SUCCESS 0
-#define ERROR 1
+
 class Barrier {
 public:
 	Barrier(int numThreads);
