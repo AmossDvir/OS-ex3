@@ -130,6 +130,7 @@ void resetState (JobContext *job, const stage_t &stage, unsigned long total)
     pthread_mutex_unlock (job->stateMutex);
 }
 
+
 // Handler functions:
 
 void handleMap (ThreadContext *threadContext)
